@@ -1,0 +1,16 @@
+# Task 2 deny-path probe. Apply once, capture the rejection, then delete.
+# Destination kube-system is not in the expense AppProject destinations.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: expense-api-rogue
+  namespace: argocd
+spec:
+  project: expense
+  source:
+    repoURL: https://github.com/AI-Native-2026-08-05-Intuit/manya-bhasin-expense-config.git
+    path: overlays/dev
+    targetRevision: config-1
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system

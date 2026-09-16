@@ -1,0 +1,72 @@
+# argocd/applicationsets/expense-api-envs.yaml
+# Matrix: env list × clusters labelled uptimecrew.example.internal/tier=workload.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: expense-api-envs
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env: dev
+                  overlay: overlays/dev
+                  namespace: expense-dev
+                  wave: "0"
+                - env: staging
+                  overlay: overlays/staging
+                  namespace: expense-staging
+                  wave: "1"
+                - env: prod
+                  overlay: overlays/prod
+                  namespace: expense-prod
+                  wave: "2"
+          - clusters:
+              selector:
+                matchLabels:
+                  uptimecrew.example.internal/tier: workload
+  template:
+    metadata:
+      name: "expense-api-{{.env}}"
+      namespace: argocd
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+      labels:
+        env: "{{.env}}"
+        team: expense
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{.wave}}"
+    spec:
+      project: expense
+      source:
+        repoURL: https://github.com/AI-Native-2026-08-05-Intuit/manya-bhasin-expense-config.git
+        path: "{{.overlay}}"
+        # Default branch of this repo is config-1; there is no main.
+        targetRevision: config-1
+      destination:
+        server: "{{.server}}"
+        namespace: "{{.namespace}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 3m

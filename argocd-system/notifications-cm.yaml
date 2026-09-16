@@ -1,0 +1,64 @@
+# argocd-system/notifications-cm.yaml
+# Slack token lives in Secret argocd-notifications-secret (slack-token), never Git.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  # Incoming webhook URL (hooks.slack.com) is not a Slack Bot token.
+  # Argo CD posts JSON to $slack-token from Secret argocd-notifications-secret.
+  # Recipient is webhook:slack; an incoming webhook always posts to the single
+  # channel it was created for -- here #argocd-notifications. That is why there
+  # is no channel: field to set (the brief's "expense-deploys" is the lab name
+  # for the same team channel).
+  service.webhook.slack: |
+    url: $slack-token
+    headers:
+      - name: Content-Type
+        value: application/json
+  trigger.on-sync-failed: |
+    - description: Application sync failed
+      oncePer: app.status.sync.revision
+      send:
+        - app-sync-failed
+      when: app.status.operationState.phase in ['Error', 'Failed']
+  trigger.on-health-degraded: |
+    - description: Application health is Degraded
+      send:
+        - app-health-degraded
+      when: app.status.health.status == 'Degraded'
+  template.app-sync-failed: |
+    message: |
+      Application {{.app.metadata.name}} sync failed ({{.app.status.sync.status}}).
+    webhook:
+      slack:
+        method: POST
+        body: |
+          {
+            "text": ":x: *{{.app.metadata.name}}* sync failed\nProject: {{.app.spec.project}}\nRevision: {{.app.status.sync.revision}}\n{{.app.status.operationState.message}}"
+          }
+  template.app-health-degraded: |
+    message: |
+      Application {{.app.metadata.name}} health is {{.app.status.health.status}}.
+    webhook:
+      slack:
+        method: POST
+        body: |
+          {
+            "text": ":warning: *{{.app.metadata.name}}* health is {{.app.status.health.status}}\nProject: {{.app.spec.project}}"
+          }
+  # Every Application labelled team=expense routes to #argocd-notifications.
+  # Only failure triggers are subscribed. A success-on-every-sync trigger is
+  # deliberately absent: subscribing all three envs to it produces a deploy
+  # firehose that buries real failures.
+  # Recipient is the SERVICE NAME from service.webhook.slack -- i.e. "slack".
+  # Writing "webhook:slack" makes Argo CD look for a service literally named
+  # "webhook" and fail with "notification service 'webhook' is not supported".
+  subscriptions: |
+    - recipients:
+        - slack
+      selector: team=expense
+      triggers:
+        - on-sync-failed
+        - on-health-degraded

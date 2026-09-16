@@ -13,10 +13,16 @@ namespace: expense-dev
 commonAnnotations:
   argocd.argoproj.io/sync-wave: "0"
 
+# W6 D1 pushes to ECR, so the pullable ref is the ECR registry -- a bare
+# uptimecrew/expense-api resolves to Docker Hub and 404s. newTag is the CI
+# commit SHA; _bump-config.yml rewrites that line only.
+# W6 D1 pushes to ECR, so the pullable ref is the ECR registry -- a bare
+# uptimecrew/expense-api resolves to Docker Hub and 404s. newTag is the CI
+# commit SHA; _bump-config.yml rewrites that one line.
 images:
   - name: uptimecrew/expense-api
-    newName: uptimecrew/expense-api
-    newTag: 36627f39ee74f1397a5f1dabd9294422efd27128
+    newName: 625397071689.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/expense-api
+    newTag: 70ff4abdf369b6a941fc5db679e504f48c5ad8f2
 
 replicas:
   - name: expense-api
