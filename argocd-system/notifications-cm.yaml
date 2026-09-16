@@ -52,9 +52,12 @@ data:
   # Only failure triggers are subscribed. A success-on-every-sync trigger is
   # deliberately absent: subscribing all three envs to it produces a deploy
   # firehose that buries real failures.
+  # Recipient is the SERVICE NAME from service.webhook.slack -- i.e. "slack".
+  # Writing "webhook:slack" makes Argo CD look for a service literally named
+  # "webhook" and fail with "notification service 'webhook' is not supported".
   subscriptions: |
     - recipients:
-        - webhook:slack
+        - slack
       selector: team=expense
       triggers:
         - on-sync-failed

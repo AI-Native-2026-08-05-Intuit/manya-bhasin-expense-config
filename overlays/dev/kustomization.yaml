@@ -58,5 +58,3 @@ patches:
       - op: replace
         path: /spec/minReplicas
         value: 1
-
-THIS IS INVALID YAML
