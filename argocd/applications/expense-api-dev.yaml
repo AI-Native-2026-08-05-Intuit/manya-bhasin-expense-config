@@ -1,0 +1,41 @@
+# argocd/applications/expense-api-dev.yaml
+# Single-env Application for the dev overlay. Task 3's ApplicationSet
+# generates matching Applications (including dest); delete this standalone
+# after the ApplicationSet is Healthy so the two do not race.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: expense-api-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  labels:
+    env:  dev
+    team: expense
+spec:
+  project: expense
+  source:
+    repoURL:        https://github.com/AI-Native-2026-08-05-Intuit/manya-bhasin-expense-config.git
+    path:           overlays/dev
+    # This repo's default branch is config-1; there is no main.
+    targetRevision: config-1
+  destination:
+    server:    https://kubernetes.default.svc
+    namespace: expense-dev
+  syncPolicy:
+    automated:
+      prune:      true
+      selfHeal:   true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration:    10s
+        factor:      2
+        maxDuration: 3m

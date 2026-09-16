@@ -12,8 +12,8 @@ commonAnnotations:
 
 images:
   - name: uptimecrew/expense-api
-    newName: uptimecrew/expense-api
-    newTag: 36627f39ee74f1397a5f1dabd9294422efd27128
+    newName: 625397071689.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/expense-api
+    newTag: 70ff4abdf369b6a941fc5db679e504f48c5ad8f2
 
 replicas:
   - name: expense-api

@@ -1,0 +1,77 @@
+# argocd/projects/expense.yaml
+# AppProject scoping the expense capstone team.
+# The platform team owns this file in practice; the app team
+# proposes changes via PR. Every Application in this assignment
+# has spec.project = expense -- never "default".
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: expense
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: expense-api capstone -- GitOps overlays + observability
+
+  sourceRepos:
+    - https://github.com/AI-Native-2026-08-05-Intuit/manya-bhasin-expense-config.git
+
+  destinations:
+    - server:    https://kubernetes.default.svc
+      namespace: expense-dev
+    - server:    https://kubernetes.default.svc
+      namespace: expense-staging
+    - server:    https://kubernetes.default.svc
+      namespace: expense-prod
+
+  # Namespace is cluster-scoped. CreateNamespace=true injects a Namespace
+  # object into the sync; an empty whitelist makes that task invalid.
+  # Allow only Namespace -- still no ClusterRoles/CRDs/PVs.
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+
+  namespaceResourceWhitelist:
+    - {group: "",                       kind: Namespace}
+    - {group: "",                       kind: Service}
+    - {group: "",                       kind: ConfigMap}
+    - {group: "",                       kind: Secret}
+    - {group: "",                       kind: ServiceAccount}
+    - {group: apps,                     kind: Deployment}
+    - {group: autoscaling,              kind: HorizontalPodAutoscaler}
+    - {group: policy,                   kind: PodDisruptionBudget}
+    - {group: networking.k8s.io,        kind: NetworkPolicy}
+    - {group: monitoring.coreos.com,    kind: ServiceMonitor}
+    - {group: monitoring.coreos.com,    kind: PrometheusRule}
+
+  namespaceResourceBlacklist:
+    - {group: "", kind: ResourceQuota}
+    - {group: "", kind: LimitRange}
+
+  syncWindows:
+    - kind: deny
+      schedule: "0 17 * * 5"
+      duration: 60h
+      applications:
+        - "expense-api-prod"
+      manualSync: true
+
+  roles:
+    - name: developers
+      description: Read everything; sync dev and staging only.
+      policies:
+        - p, proj:expense:developers, applications, get,    expense/*,                allow
+        - p, proj:expense:developers, applications, sync,   expense/expense-api-dev,   allow
+        - p, proj:expense:developers, applications, sync,   expense/expense-api-staging, allow
+        - p, proj:expense:developers, applications, delete, expense/*,                deny
+        - p, proj:expense:developers, logs,         get,    expense/*,                allow
+      groups:
+        - uptimecrew:expense-engineers
+    - name: releasers
+      description: Full sync including prod. Cannot delete Applications.
+      policies:
+        - p, proj:expense:releasers, applications, get,    expense/*, allow
+        - p, proj:expense:releasers, applications, sync,   expense/*, allow
+        - p, proj:expense:releasers, applications, action/*, expense/*, allow
+        - p, proj:expense:releasers, applications, delete, expense/*, deny
+      groups:
+        - uptimecrew:expense-engineers-releasers
