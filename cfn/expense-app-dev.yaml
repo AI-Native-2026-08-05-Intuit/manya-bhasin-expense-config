@@ -1,0 +1,339 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  expense-app-dev - RDS PostgreSQL 16 in private subnets, secret-resolved
+  master password, ECS Fargate service for expense-api, ALB on 443, CloudWatch
+  Logs, IAM (no inline policies). Imports VPC/subnets/SG from the network stack.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  ImageUri:
+    Type: String
+    Default: 625397071689.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/expense-api:latest
+    Description: Full ECR URI including tag. Overridden at deploy time from GitOps CI.
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN for the ALB HTTPS listener.
+
+Resources:
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub expense-${EnvName} private subnets
+      SubnetIds: !Split
+        - ","
+        - Fn::ImportValue: !Sub expense-network-${EnvName}-PrivateSubnets
+      Tags:
+        - Key: Name
+          Value: !Sub expense-${EnvName}-db-subnets
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: RDS needs HTTPS egress for engine patches and Secrets Manager via NAT.
+    Properties:
+      GroupDescription: PostgreSQL 5432 from the app SG only
+      VpcId:
+        Fn::ImportValue: !Sub expense-network-${EnvName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            Fn::ImportValue: !Sub expense-network-${EnvName}-AppSgId
+          Description: Postgres from expense-api
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS (patches, Secrets Manager via NAT)
+      Tags:
+        - Key: Name
+          Value: !Sub expense-${EnvName}-db-sg
+
+  AppToDbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub expense-network-${EnvName}-AppSgId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: Postgres to RDS
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Named identifier is required so operators can find the expense RDS instance.
+    Properties:
+      DBInstanceIdentifier: !Sub expense-${EnvName}
+      Engine: postgres
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      MultiAZ: false
+      PubliclyAccessible: false
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      MasterUsername: !Sub "{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:password}}"
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "03:00-04:00"
+      PreferredMaintenanceWindow: "sun:04:00-sun:05:00"
+      DeletionProtection: true
+      EnableCloudwatchLogsExports:
+        - postgresql
+      Tags:
+        - Key: Name
+          Value: !Sub expense-${EnvName}-rds
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: Capstone log group uses default AWS-managed encryption.
+    Properties:
+      LogGroupName: !Sub /ecs/expense-${EnvName}
+      RetentionInDays: 30
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub expense-${EnvName}
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable role name is required for ECS task execution.
+    Properties:
+      RoleName: !Sub expense-${EnvName}-ecs-execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - !Ref TaskExecutionSecretsPolicy
+
+  TaskExecutionSecretsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Pull RDS master password from Secrets Manager at task start
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: !Sub arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:expense/${EnvName}/db-master*
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable task role name is required for operators.
+    Properties:
+      RoleName: !Sub expense-${EnvName}-ecs-task
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W2
+            reason: Internet-facing ALB must accept 443 from the world.
+          - id: W9
+            reason: Public HTTPS cannot be restricted to a /32.
+    Properties:
+      GroupDescription: ALB HTTPS 443 from the internet
+      VpcId:
+        Fn::ImportValue: !Sub expense-network-${EnvName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          DestinationSecurityGroupId:
+            Fn::ImportValue: !Sub expense-network-${EnvName}-AppSgId
+          Description: Forward to expense-api
+      Tags:
+        - Key: Name
+          Value: !Sub expense-${EnvName}-alb-sg
+
+  AlbToAppIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub expense-network-${EnvName}-AppSgId
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: ALB to expense-api
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Named ALB is required for DNS and operator lookup.
+          - id: W52
+            reason: ALB access logs are out of scope for Day 3.
+    Properties:
+      Name: !Sub expense-${EnvName}-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Split
+        - ","
+        - Fn::ImportValue: !Sub expense-network-${EnvName}-PublicSubnets
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub expense-${EnvName}-tg
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId:
+        Fn::ImportValue: !Sub expense-network-${EnvName}-VpcId
+      HealthCheckEnabled: true
+      HealthCheckPath: /actuator/health
+      HealthCheckProtocol: HTTP
+      Matcher:
+        HttpCode: "200"
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub expense-${EnvName}
+      Cpu: "256"
+      Memory: "512"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: expense-api
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: SPRING_DATASOURCE_URL
+              Value: !Sub
+                - jdbc:postgresql://${Host}:5432/postgres
+                - Host: !GetAtt DbInstance.Endpoint.Address
+          Secrets:
+            - Name: SPRING_DATASOURCE_USERNAME
+              ValueFrom: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:expense/${EnvName}/db-master:username::"
+            - Name: SPRING_DATASOURCE_PASSWORD
+              ValueFrom: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:expense/${EnvName}/db-master:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpsListener
+    Properties:
+      ServiceName: !Sub expense-${EnvName}-api
+      Cluster: !Ref EcsCluster
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      TaskDefinition: !Ref TaskDefinition
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub expense-network-${EnvName}-AppSgId
+          Subnets: !Split
+            - ","
+            - Fn::ImportValue: !Sub expense-network-${EnvName}-PrivateSubnets
+      LoadBalancers:
+        - ContainerName: expense-api
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup
+
+Outputs:
+  AlbDnsName:
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Export:
+      Name: !Sub expense-app-${EnvName}-AlbDnsName
+  RdsEndpoint:
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export:
+      Name: !Sub expense-app-${EnvName}-RdsEndpoint
+  ClusterName:
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub expense-app-${EnvName}-ClusterName

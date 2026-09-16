@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  expense-bootstrap-dev - artefact S3 bucket (aws cloudformation package)
+  and GitHub Actions OIDC deploy role. First stack; later stacks import its
+  exports.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  RetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 7
+    MaxValue: 3650
+    Description: Expire noncurrent object versions after this many days.
+  GitHubOrg:
+    Type: String
+    Default: AI-Native-2026-08-05-Intuit
+    Description: GitHub org in the OIDC sub claim.
+  GitHubRepo:
+    Type: String
+    Default: manya-bhasin-expense-config
+    Description: Gitops repo in the OIDC sub claim (not the application repo).
+
+Resources:
+  BootstrapBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Bootstrap bucket is short-lived packaged templates; access logging is out of scope.
+          - id: W51
+            reason: Bucket policy is TLS-deny only.
+    Properties:
+      BucketName: !Sub expense-${EnvName}-cfn-bootstrap-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-noncurrent
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref RetentionDays
+
+  BootstrapBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BootstrapBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt BootstrapBucket.Arn
+              - !Sub ${BootstrapBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  CfnDeployRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Assignment requires the stable name expense-api-cfn-deploy for OIDC assume.
+    Properties:
+      RoleName: expense-api-cfn-deploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      Policies:
+        - PolicyName: expense-cfn-deploy-inline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormationOnExpenseStacks
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:ListChangeSets
+                Resource: arn:aws:cloudformation:*:*:stack/expense-*
+              - Sid: BootstrapBucketObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                Resource: !Sub ${BootstrapBucket.Arn}/*
+              - Sid: BootstrapBucketList
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: !GetAtt BootstrapBucket.Arn
+              - Sid: PassCfnRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/expense-*
+
+Outputs:
+  BootstrapBucketName:
+    Value: !Ref BootstrapBucket
+    Export:
+      Name: !Sub expense-bootstrap-${EnvName}-BootstrapBucketName
+  BootstrapBucketArn:
+    Value: !GetAtt BootstrapBucket.Arn
+    Export:
+      Name: !Sub expense-bootstrap-${EnvName}-BootstrapBucketArn
+  CfnDeployRoleArn:
+    Value: !GetAtt CfnDeployRole.Arn
+    Export:
+      Name: !Sub expense-bootstrap-${EnvName}-CfnDeployRoleArn
