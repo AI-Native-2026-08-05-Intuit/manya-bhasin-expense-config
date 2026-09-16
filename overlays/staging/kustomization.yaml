@@ -1,0 +1,51 @@
+# overlays/staging — same shape as overlays/dev.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: expense-staging
+
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "0"
+
+images:
+  - name: uptimecrew/expense-api
+    newName: uptimecrew/expense-api
+    newTag: 36627f39ee74f1397a5f1dabd9294422efd27128
+
+replicas:
+  - name: expense-api
+    count: 2
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: expense-api-config
+    patch: |-
+      - op: replace
+        path: /data/SPRING_PROFILES_ACTIVE
+        value: staging
+      - op: replace
+        path: /data/LOG_LEVEL
+        value: INFO
+      - op: replace
+        path: /data/SPRING_DATASOURCE_URL
+        value: jdbc:postgresql://postgres.expense-staging.svc.cluster.local:5432/expense_tracking
+      - op: replace
+        path: /data/SPRING_REDIS_HOST
+        value: redis.expense-staging.svc.cluster.local
+      - op: replace
+        path: /data/SPRING_DATA_MONGODB_URI
+        value: mongodb://mongo.expense-staging.svc.cluster.local:27017/expense
+      - op: replace
+        path: /data/SPRING_KAFKA_BOOTSTRAP_SERVERS
+        value: kafka.expense-staging.svc.cluster.local:9092
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: expense-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2

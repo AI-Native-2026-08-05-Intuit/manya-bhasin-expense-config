@@ -1,0 +1,23 @@
+# expense-config/base/kustomization.yaml
+# W5 D3 manifests, copied into the GitOps repo. Overlays rewrite
+# namespace, replicas, image tag, and env-specific ConfigMap values.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Namespace + ResourceQuota + LimitRange are platform-owned.
+  # AppProject blacklists Quota/LimitRange; CreateNamespace=true on the
+  # Application still creates expense-* namespaces.
+  # - 00-namespace.yaml
+  - 05-postgres.yaml
+  - 06-redis.yaml
+  - 07-mongo.yaml
+  - 08-kafka.yaml
+  - 10-expense-api.deployment.yaml
+  - 20-expense-api.service.yaml
+  - 30-expense-api.configmap.yaml
+  - 40-expense-api.secret.yaml
+  - 50-expense-api.hpa.yaml
+  # Ingress is not on the AppProject namespaceResourceWhitelist.
+  # - 60-expense-api.ingress.yaml
+  - 60-expense-api.servicemonitor.yaml

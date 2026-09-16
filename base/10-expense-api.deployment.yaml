@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expense-api
+  namespace: expense-dev
+  labels:
+    app.kubernetes.io/name: expense-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: expense-tracking
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: expense-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: expense-api
+        app.kubernetes.io/component: backend
+        app.kubernetes.io/part-of: expense-tracking
+        app.kubernetes.io/managed-by: kubectl
+      annotations:
+        checksum/config: "3a4a4f80610457b76fa8124f126aa9c193cc05a6dba401a6acc4fbc0934e1a12"
+        checksum/secret: "04792fba1d79a1668f31b011524147a1465cbcc758d830754a942e1fd087ab7"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      containers:
+        - name: expense-api
+          image: uptimecrew/expense-api:0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: expense-api-config
+            - secretRef:
+                name: expense-api-secrets
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            initialDelaySeconds: 0
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1

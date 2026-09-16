@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: expense-dev
+  labels:
+    app.kubernetes.io/name: expense-tracking
+    app.kubernetes.io/component: namespace
+    app.kubernetes.io/part-of: expense-tracking
+    app.kubernetes.io/managed-by: kubectl
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: expense-dev-quota
+  namespace: expense-dev
+  labels:
+    app.kubernetes.io/name: expense-tracking
+    app.kubernetes.io/component: resource-quota
+    app.kubernetes.io/part-of: expense-tracking
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "20"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: expense-dev-limits
+  namespace: expense-dev
+  labels:
+    app.kubernetes.io/name: expense-tracking
+    app.kubernetes.io/component: limit-range
+    app.kubernetes.io/part-of: expense-tracking
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 256Mi
+      default:
+        cpu: 500m
+        memory: 768Mi
