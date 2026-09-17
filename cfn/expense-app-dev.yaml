@@ -77,8 +77,8 @@ Resources:
 
   DbInstance:
     Type: AWS::RDS::DBInstance
-    DeletionPolicy: Snapshot
-    UpdateReplacePolicy: Snapshot
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -107,6 +107,13 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub expense-${EnvName}-rds
+
+  DbSecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Sub expense/${EnvName}/db-master
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
 
   LogGroup:
     Type: AWS::Logs::LogGroup
