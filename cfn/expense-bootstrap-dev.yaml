@@ -100,8 +100,12 @@ Resources:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
               StringLike:
                 "token.actions.githubusercontent.com:sub":
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/config-1"
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
+                  # This org's GitHub Enterprise config appends internal numeric
+                  # entity IDs to the org and repo names in the sub claim
+                  # (repo:org@123/repo@456:pull_request). Wildcards absorb those
+                  # suffixes while still requiring the exact org/repo names.
+                  - !Sub "repo:${GitHubOrg}*/${GitHubRepo}*:ref:refs/heads/config-1"
+                  - !Sub "repo:${GitHubOrg}*/${GitHubRepo}*:pull_request"
       Policies:
         - PolicyName: cfn-deploy-narrow
           PolicyDocument:

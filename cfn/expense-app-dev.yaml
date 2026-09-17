@@ -114,6 +114,15 @@ Resources:
         - {Key: user, Value: !Ref OwnerTag}
         - {Key: Project, Value: expense}
 
+  # Secret itself is created out-of-band (expense/${EnvName}/db-master).
+  # Attachment still lives here so rotation can target the live RDS ARN.
+  DbSecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Sub expense/${EnvName}/db-master
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
+
 Outputs:
   DbEndpoint:
     Value: !GetAtt DbInstance.Endpoint.Address
