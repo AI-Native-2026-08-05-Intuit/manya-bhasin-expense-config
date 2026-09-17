@@ -15,7 +15,7 @@ jobs:
   lint-and-validate:
     name: cfn-lint, cfn-nag, validate-template
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -62,9 +62,15 @@ jobs:
           LC_ALL: en_US.UTF-8
         run: |
           set -euo pipefail
-          gem install --user-install cfn-nag -v 0.8.10
-          RUBY_U="$(ruby -e 'puts Gem.user_dir')/bin"
-          export PATH="$RUBY_U:$PATH"
+          # cfn-nag 0.8.10 / kwalify call StringScanner#peep, removed in Ruby 4.
+          if [ ! -x /opt/homebrew/opt/ruby@3.2/bin/ruby ]; then
+            brew install ruby@3.2
+          fi
+          export PATH="/opt/homebrew/opt/ruby@3.2/bin:${PATH}"
+          ruby -v
+          export GEM_HOME="${{ runner.temp }}/cfn-nag-gems"
+          export PATH="${GEM_HOME}/bin:${PATH}"
+          gem install cfn-nag -v 0.8.10 --no-document
           cfn_nag_scan --version
           cfn_nag_scan --fail-on-warnings --input-path cfn/
 
