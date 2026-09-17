@@ -1,10 +1,11 @@
 # CloudFormation lint + nag + validate-template
-# Runs on PRs against main and remains manually dispatchable.
+
+# Runs on PRs that touch cfn/ against the gitops default branch (config-1).
 name: cfn-validate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [config-1]
   workflow_dispatch:
 
 permissions:
