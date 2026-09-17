@@ -17,7 +17,12 @@ spec:
     spec:
       containers:
         - name: tei
-          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+          # Assignment image cpu-1.5 is amd64-only. This Apple Silicon k3d
+          # cluster cannot unpack it (ctr: no match for platform). Use the
+          # course ARM64 TEI image; it still serves BAAI/bge-large-en-v1.5
+          # (1024-d) on :80.
+          image: 625397071689.dkr.ecr.us-east-1.amazonaws.com/uptimecrew/tei-arm64-dev:bge-large-en-v1.5-cpu-arm64
+          imagePullPolicy: IfNotPresent
           args:
             - --model-id
             - BAAI/bge-large-en-v1.5
