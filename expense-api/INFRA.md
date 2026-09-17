@@ -1,173 +1,121 @@
 # expense-api — CloudFormation infra (Week 6 Day 3)
 
-Four stacks live in `cfn/` of this gitops repo. They are deployed in
-**strict order**. Later stacks import earlier exports; deleting a producer
-while a consumer exists is refused by CloudFormation.
+How this gitops repo provisions **Manya-only** AWS stacks in the shared
+training account (`625397071689`, `us-east-1`). Stack and resource names use
+the `-manya` suffix so they do not collide with generic `expense-*-dev` or
+teammate stacks.
 
-Default branch for this repo is `config-1` (not `main`). PRs and the
-`cfn-validate` workflow target `config-1`.
+Default branch: **`config-1`**. The `cfn-validate` workflow and PRs target
+`config-1`. OIDC trust is pinned to
+`AI-Native-2026-08-05-Intuit/manya-bhasin-expense-config` (with `*` wildcards
+for Intuit GitHub entity IDs in the `sub` claim — see below).
 
-| Order | Stack name | Template | What it creates |
+## Stack layout
+
+| Order | Stack name | Template | Purpose |
 | --- | --- | --- | --- |
-| 1 | `expense-bootstrap-dev` | `cfn/expense-bootstrap-dev.yaml` | Packaged-template S3 bucket + OIDC role `expense-api-cfn-deploy` |
-| 2 | `expense-network-dev` | `cfn/expense-network-dev.yaml` | 3-AZ VPC, public/private subnets, NAT (one in `dev`), app SG |
-| 3 | `expense-artifacts-dev` | `cfn/expense-artifacts-dev.yaml` | Hardened artefacts bucket `uptimecrew-expense-artifacts-dev` |
-| 4 | `expense-app-dev` | `cfn/expense-app-dev.yaml` | RDS Postgres 16, ECS Fargate + ALB; imports network exports |
+| 1 | `expense-bootstrap-dev-manya` | `cfn/expense-bootstrap-dev.yaml` | Bootstrap S3 bucket + `expense-api-cfn-deploy-manya` OIDC role |
+| 2 | `expense-artifacts-dev-manya` | `cfn/expense-artifacts-dev.yaml` | Hardened artefacts bucket |
+| 3 | `expense-network-dev-manya` | `cfn/expense-network-dev.yaml` | 3-AZ VPC, NAT (one in dev), app SG |
+| 4 | `expense-app-dev-manya` | `cfn/expense-app-dev.yaml` | RDS Postgres only (Task 3 scope) |
 
-GitHub OIDC trust is pinned to
-`AI-Native-2026-08-05-Intuit/manya-bhasin-expense-config`, not the
-application repo.
+Parameters shared across templates:
 
-## Deploy ordering and ChangeSet flow
+- **`PersonName`**: `manya` — suffix for globally unique names.
+- **`OwnerTag`**: `manya-bhasin` — required SCP tag `user`.
+- Every taggable resource also carries `Environment`, `env: sandbox`, and
+  `Project: expense`. Use **`Environment`**, not `Env`, on IAM-tagged
+  resources (duplicate keys are rejected case-insensitively).
 
-Bootstrap first (nothing to import). Network second. Artifacts can run
-in parallel with app **after** network exists; app **must** wait for
-network exports.
+Exports use **`${AWS::StackName}-<Output>`** (e.g.
+`expense-network-dev-manya-PrivateSubnets`). The app stack imports via
+`NetworkStackName` (default `expense-network-dev-manya`), not hardcoded IDs.
 
-Every create or update uses a ChangeSet. Never `deploy` that auto-executes.
+## Deploy order and ChangeSet flow
+
+Never execute a blind `create-stack` / `update-stack`. Always create a change
+set, review `describe-change-set`, then execute.
+
+Pass stack tags on create (SCP):
 
 ```bash
-# CREATE (stack does not exist yet)
-aws cloudformation create-change-set \
-  --stack-name expense-bootstrap-dev \
-  --change-set-name bootstrap-create \
-  --change-set-type CREATE \
-  --template-body file://cfn/expense-bootstrap-dev.yaml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region us-east-1
-
-aws cloudformation describe-change-set \
-  --stack-name expense-bootstrap-dev \
-  --change-set-name bootstrap-create \
-  --region us-east-1
-
-aws cloudformation execute-change-set \
-  --stack-name expense-bootstrap-dev \
-  --change-set-name bootstrap-create \
-  --region us-east-1
-
-aws cloudformation wait stack-create-complete \
-  --stack-name expense-bootstrap-dev \
-  --region us-east-1
+--tags Key=env,Value=sandbox Key=user,Value=manya-bhasin Key=Project,Value=expense
 ```
 
-For an in-place update (Task 4 CIDR/tag tweak), use `--change-set-type UPDATE`
-and confirm `Replacement: False` on every `Modify` before execute.
+Bootstrap and app need `--capabilities CAPABILITY_NAMED_IAM`.
 
-Network / app / artifacts follow the same pattern. App and bootstrap need
-`--capabilities CAPABILITY_NAMED_IAM`. App also needs
-`--parameters ParameterKey=CertificateArn,ParameterValue=<acm-arn>`
-(and `ImageUri` when pinning a digest).
+### Bootstrap: SCP `s3:CreateBucket` deny
 
-One-time secret (password never in git or in a `NoEcho` parameter):
+This account’s SCP (`p-upmysz2c`) denies **`s3:CreateBucket`** for some users.
+If `expense-bootstrap-dev-manya` rolls back on bucket **CREATE**, use the same
+pattern as the reference multistate capstone:
+
+1. Create bucket **`expense-bootstrap-dev-manya-625397071689`** out-of-band with
+   versioning, SSE-KMS (`alias/aws/s3`), PAB ×4, lifecycle, and SCP tags.
+2. **IMPORT** change set with `docs/w6d3-evidence/import-resources.json`.
+3. **UPDATE** change set to add `BootstrapBucketPolicy` and `CfnDeployRole`.
+
+Template parameter **`ExistingBucketName`** points at that bucket.
+
+### RDS credentials (out of band)
+
+The app template does **not** create a Secrets Manager secret or
+`SecretTargetAttachment`. Create the shared secret once:
 
 ```bash
 aws secretsmanager create-secret \
   --name expense/dev/db-master \
-  --secret-string '{"username": "expense_admin", "password": "REPLACE_ME_LOCAL_DEV_ONLY"}' \
+  --secret-string '{"username":"expense_admin","password":"REPLACE_ME"}' \
   --region us-east-1
 ```
 
-RDS `MasterUsername` / `MasterUserPassword` are
-`{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:username|password}}`.
+RDS `MasterUsername` / `MasterUserPassword` use dynamic references to
+`expense/${EnvName}/db-master`.
 
-## Cross-stack export names
+### Network CIDR
 
-Exports use `expense-<layer>-${EnvName}-<Output>` so they stay unique per env.
+Default **`VpcCidr`** is **`10.44.0.0/16`** (10.42 / 10.43 are used by
+teammates). Do not change a live VPC CIDR in Task 4 — use a harmless tag-only
+or additive update; **`ec2:DeleteTags`** is also denied by SCP, so do not
+change the `user` tag value on NAT gateways.
 
-**Network → app**
+## Cross-stack safety
 
-- `expense-network-dev-VpcId`
-- `expense-network-dev-PublicSubnets` (comma-joined)
-- `expense-network-dev-PrivateSubnets`
-- `expense-network-dev-AppSgId`
-- `expense-network-dev-VpcCidr`
+Deleting `expense-network-dev-manya` while `expense-app-dev-manya` exists
+must fail with an export-in-use error (`AppSgId`, `PrivateSubnets`, `VpcId`).
 
-App consumes them with `Fn::ImportValue` / `!Split` on the subnet lists.
-Subnet IDs are never hardcoded.
+## Drift (Task 4)
 
-**Bootstrap** (`expense-bootstrap-dev-BootstrapBucketName`,
-`…BootstrapBucketArn`, `…CfnDeployRoleArn`) is for `cloudformation package`
-and the GitHub Actions assume-role ARN.
+On `expense-artifacts-dev-manya`: detect drift → add a console tag →
+`DRIFTED` → remove tag → `IN_SYNC`. Evidence JSON lives under
+`docs/w6d3-evidence/`.
 
-After app (or any importer) is up, `delete-stack` on `expense-network-dev`
-must fail with **Export is in use**. That is the safety net; cancel the
-delete.
+## OIDC note (GitHub `sub` claim)
 
-## Drift verification (Task 4)
+Trust policy uses:
 
-Deliberate console edit: add a tag on `uptimecrew-expense-artifacts-dev`.
-
-```bash
-aws cloudformation detect-stack-drift --stack-name expense-artifacts-dev --region us-east-1
-aws cloudformation describe-stack-resource-drifts --stack-name expense-artifacts-dev --region us-east-1
+```text
+repo:${GitHubOrg}*/${GitHubRepo}*:ref:refs/heads/config-1
+repo:${GitHubOrg}*/${GitHubRepo}*:pull_request
 ```
 
-Expect `DRIFTED`. Revert the tag in the console; a second detect should
-return `IN_SYNC`. Paste 4–6 lines of the drift JSON into the PR body.
+so internal `@<entity-id>` suffixes on org/repo names still match.
 
-## CI (`cfn-validate.yml`)
+## cfn-author Skill audit (brief)
 
-On every PR to `config-1` that touches `cfn/`:
+- **Accepted**: `!Cidr` / `!Select` subnet layout (portable `VpcCidr`).
+- **Rejected**: `NoEcho` DB password parameter — use Secrets Manager dynamic
+  reference to the existing `expense/dev/db-master` secret instead.
+- **Checked**: `DeletionPolicy: Retain` paired with `UpdateReplacePolicy: Retain`
+  on buckets, RDS, and stateful resources.
 
-1. `cfn-lint` with `-a cfn_lint_serverless.rules`
-2. `cfn_nag_scan --fail-on-warnings --input-path cfn/`
-3. `aws cloudformation validate-template` for each file (OIDC into
-   `expense-api-cfn-deploy`)
+## Local validation
 
-`validate-template` needs the bootstrap role to already exist in the
-account. Until Task 1 is `CREATE_COMPLETE`, that last step cannot pass
-in Actions — run it locally after `aws sso login`.
+```bash
+cfn-lint --regions us-east-1 -t cfn/*.yaml
+cfn_nag_scan --fail-on-warnings --input-path cfn/
+aws cloudformation validate-template --template-body file://cfn/<file>.yaml --region us-east-1
+```
 
-Mark `cfn-validate` as a required status check on `config-1` once the
-workflow has run once.
-
-## NAT Conditions
-
-`IsProdLike` is true for `staging` and `prod`. `IsDev` is the inverse
-(also written onto the VPC `NatPattern` tag). Dev creates a single NAT
-in AZ-a; private route tables B and C point at it. Staging/prod create
-`NatGatewayBPerAz` and `NatGatewayCPerAz`. That is a cost vs HA split,
-not two templates.
-
-## Why dynamic reference instead of `NoEcho`
-
-`NoEcho` only hides the value in `describe-stacks`. It still lives in
-the ChangeSet / console parameter blob and in operator shell history.
-Secrets Manager stores the secret outside the template; CFN resolves it
-at create/update. Rotating the secret does not require a template edit
-of the password string.
-
-## Why cfn-lint and cfn-nag together
-
-`cfn-lint` is CloudFormation-aware syntax and resource-spec checking
-(plus serverless extra rules). `cfn-nag` is a security opinion set
-(open SGs, unencrypted storage, IAM wildcards). A template can be
-lint-clean and still fail nag; both must be 0 for the PR.
-
-## cfn-author skill audit (run on a scratch branch)
-
-Compared to `/cfn-author expense --region us-east-1` output, these
-templates already avoid the usual skill mistakes:
-
-| Skill quirk | What we did instead |
-| --- | --- |
-| `StringLike` on the OIDC **aud** claim | `StringEquals` on `aud` = `sts.amazonaws.com`; `StringLike` only on `sub` |
-| `NoEcho: true` password parameter | Secrets Manager dynamic reference; secret created out of band |
-| `DeletionPolicy: Retain` on S3 without `UpdateReplacePolicy: Retain` | Both set on bootstrap + artefacts buckets |
-| GitHub org/repo defaults `uptimecrew/expense-config` | Defaults `AI-Native-2026-08-05-Intuit` / `manya-bhasin-expense-config` |
-
-Re-run the skill on a throwaway branch before merge and paste any new
-deltas here if the generated YAML drifts.
-
-## Deploy status (this branch)
-
-Templates and CI are in git. AWS ChangeSets are **blocked** until
-`aws sts get-caller-identity` succeeds for account `625397071689`
-(SSO token was expired when the templates were authored). After login:
-
-1. Create `expense/dev/db-master` if missing
-2. ChangeSet-create bootstrap → network → artifacts → app
-3. Paste `describe-change-set` JSON into the PR
-4. Drift + UPDATE changeset on network
-5. Confirm `cfn-validate` green
+CI: `.github/workflows/cfn-validate.yml` assumes
+`arn:aws:iam::625397071689:role/expense-api-cfn-deploy-manya`.

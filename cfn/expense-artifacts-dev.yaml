@@ -1,14 +1,19 @@
+# cfn/expense-artifacts-dev.yaml
+# Hardened S3 artefact bucket. Independent of network; deploy before app.
 AWSTemplateFormatVersion: "2010-09-09"
-Description: >
-  expense-artifacts-dev - versioned artefacts bucket with PAB, KMS, TLS-only
-  policy, STANDARD_IA at 90 days and GLACIER_IR at 365 days. Retain on
-  replace and delete.
+Description: expense hardened artefact bucket (Task 3).
 
 Parameters:
   EnvName:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+  OwnerTag:
+    Type: String
+    Default: manya-bhasin
+  PersonName:
+    Type: String
+    Default: manya
 
 Resources:
   ArtifactsBucket:
@@ -19,36 +24,43 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W35
-            reason: Capstone artefacts bucket; access logging is out of scope for Day 3.
-          - id: W51
-            reason: Bucket policy is TLS-deny only; no cross-account principals.
+            reason: Access logging needs a separate bucket; out of scope for Day 3.
     Properties:
-      BucketName: !Sub uptimecrew-expense-artifacts-${EnvName}
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
+      BucketName: !Sub "expense-artifacts-${EnvName}-${PersonName}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: aws:kms
               KMSMasterKeyID: alias/aws/s3
             BucketKeyEnabled: true
-      VersioningConfiguration:
-        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       LifecycleConfiguration:
         Rules:
-          - Id: TransitionToIaThenGlacierIr
+          - Id: tier-to-ia-then-glacier
             Status: Enabled
             Transitions:
-              - TransitionInDays: 90
-                StorageClass: STANDARD_IA
-              - TransitionInDays: 365
-                StorageClass: GLACIER_IR
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 365
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
       Tags:
-        - Key: Name
-          Value: !Sub expense-${EnvName}-artifacts
+        - {Key: Environment, Value: !Ref EnvName}
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: !Ref OwnerTag}
+        - {Key: Project, Value: expense}
 
   ArtifactsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -57,23 +69,32 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: DenyInsecureTransport
+          - Sid: DenyNonTLS
             Effect: Deny
             Principal: "*"
-            Action: s3:*
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
             Resource:
               - !GetAtt ArtifactsBucket.Arn
-              - !Sub ${ArtifactsBucket.Arn}/*
+              - !Sub "${ArtifactsBucket.Arn}/*"
             Condition:
               Bool:
-                aws:SecureTransport: false
+                aws:SecureTransport: "false"
+          - Sid: DenyUnencryptedPut
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${ArtifactsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
 
 Outputs:
   ArtifactsBucketName:
     Value: !Ref ArtifactsBucket
-    Export:
-      Name: !Sub expense-artifacts-${EnvName}-BucketName
+    Export: {Name: !Sub "${AWS::StackName}-BucketName"}
   ArtifactsBucketArn:
     Value: !GetAtt ArtifactsBucket.Arn
-    Export:
-      Name: !Sub expense-artifacts-${EnvName}-BucketArn
+    Export: {Name: !Sub "${AWS::StackName}-BucketArn"}
