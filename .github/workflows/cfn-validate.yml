@@ -5,9 +5,7 @@ name: cfn-validate
 on:
   pull_request:
     branches: [config-1]
-    paths:
-      - "cfn/**"
-      - ".github/workflows/cfn-validate.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
