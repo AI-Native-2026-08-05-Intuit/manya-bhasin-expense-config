@@ -81,6 +81,7 @@ Exports use `expense-<layer>-${EnvName}-<Output>` so they stay unique per env.
 - `expense-network-dev-PublicSubnets` (comma-joined)
 - `expense-network-dev-PrivateSubnets`
 - `expense-network-dev-AppSgId`
+- `expense-network-dev-VpcCidr`
 
 App consumes them with `Fn::ImportValue` / `!Split` on the subnet lists.
 Subnet IDs are never hardcoded.

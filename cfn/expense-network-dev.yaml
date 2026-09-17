@@ -327,3 +327,7 @@ Outputs:
     Value: !Ref AppSecurityGroup
     Export:
       Name: !Sub expense-network-${EnvName}-AppSgId
+  VpcCidr:
+    Value: !Ref VpcCidr
+    Export:
+      Name: !Sub expense-network-${EnvName}-VpcCidr
