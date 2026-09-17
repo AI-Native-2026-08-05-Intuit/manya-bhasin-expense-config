@@ -30,23 +30,19 @@ jobs:
       - name: Install cfn-lint + serverless extra rules
         run: |
           set -euo pipefail
-          PY=python3
-          command -v python >/dev/null && PY=python
-          "$PY" --version
-          "$PY" -m pip install --upgrade pip
-          "$PY" -m pip install "cfn-lint>=1.20" cfn-lint-serverless
-          echo "$HOME/Library/Python/3.12/bin" >> "$GITHUB_PATH"
-          echo "$HOME/Library/Python/3.11/bin" >> "$GITHUB_PATH"
-          echo "$HOME/Library/Python/3.9/bin" >> "$GITHUB_PATH"
-          "$PY" -m pip show cfn-lint | head -2
+          python3 -m venv "${{ runner.temp }}/cfn-venv"
+          # shellcheck disable=SC1091
+          source "${{ runner.temp }}/cfn-venv/bin/activate"
+          python --version
+          python -m pip install --upgrade pip
+          python -m pip install "cfn-lint>=1.20" cfn-lint-serverless
+          echo "${{ runner.temp }}/cfn-venv/bin" >> "$GITHUB_PATH"
 
       - name: Run cfn-lint (serverless profile)
         run: |
           set -euo pipefail
-          PY=python3
-          command -v python >/dev/null && PY=python
-          "$PY" -m cfnlint --version
-          "$PY" -m cfnlint \
+          cfn-lint --version
+          cfn-lint \
             -a cfn_lint_serverless.rules \
             --regions us-east-1 \
             -t cfn/expense-bootstrap-dev.yaml \
