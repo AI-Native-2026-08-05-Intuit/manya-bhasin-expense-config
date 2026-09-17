@@ -1,0 +1,132 @@
+# cfn/expense-app-dev.yaml
+# Application stack: RDS PostgreSQL in private subnets. Imports network exports
+# via parameterized !ImportValue. Master credentials resolve from the shared
+# out-of-band secret expense/<env>/db-master (never a NoEcho parameter).
+AWSTemplateFormatVersion: "2010-09-09"
+Description: expense application stack -- RDS only (Task 3).
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  NetworkStackName:
+    Type: String
+    Default: expense-network-dev-manya
+    Description: Network stack whose exports this stack imports.
+  PersonName:
+    Type: String
+    Default: manya
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.small
+    AllowedValues: [db.t4g.small, db.t4g.micro, db.t4g.medium]
+  OwnerTag:
+    Type: String
+    Default: manya-bhasin
+    Description: Required sandbox SCP tag "user".
+
+Resources:
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "expense ${EnvName} private subnets"
+      SubnetIds:
+        !Split
+          - ","
+          - !ImportValue
+            Fn::Sub: "${NetworkStackName}-PrivateSubnets"
+      Tags:
+        - {Key: Environment, Value: !Ref EnvName}
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: !Ref OwnerTag}
+        - {Key: Project, Value: expense}
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: RDS may need limited HTTPS egress for patches via NAT.
+    Properties:
+      GroupDescription: !Sub "expense ${EnvName} DB SG (5432 from app SG only)."
+      VpcId:
+        !ImportValue
+          Fn::Sub: "${NetworkStackName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            !ImportValue
+              Fn::Sub: "${NetworkStackName}-AppSgId"
+          Description: Postgres from app SG only.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No outbound required for RDS.
+      Tags:
+        - {Key: Name, Value: !Sub "expense-${EnvName}-db-sg"}
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: !Ref OwnerTag}
+        - {Key: Project, Value: expense}
+
+  AppToDbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        !ImportValue
+          Fn::Sub: "${NetworkStackName}-AppSgId"
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: Postgres to RDS
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Named identifier required for operators and connection strings.
+    Properties:
+      DBInstanceIdentifier: !Sub "expense-${EnvName}-${PersonName}"
+      Engine: postgres
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: true
+      MasterUsername: !Sub "{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:password}}"
+      Tags:
+        - {Key: Environment, Value: !Ref EnvName}
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: !Ref OwnerTag}
+        - {Key: Project, Value: expense}
+
+  # Secret itself is created out-of-band (expense/${EnvName}/db-master).
+  # Attachment still lives here so rotation can target the live RDS ARN.
+  DbSecretTargetAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Sub expense/${EnvName}/db-master
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
+
+Outputs:
+  DbEndpoint:
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export: {Name: !Sub "${AWS::StackName}-DbEndpoint"}
+  DbPort:
+    Value: !GetAtt DbInstance.Endpoint.Port
+    Export: {Name: !Sub "${AWS::StackName}-DbPort"}

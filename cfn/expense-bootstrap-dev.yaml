@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: expense bootstrap stack (manya) -- artefact bucket starter + CFN deploy role.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment.
+  RetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 7
+    MaxValue: 3650
+    Description: NoncurrentVersionExpiration in days (lifecycle rule).
+  GitHubOrg:
+    Type: String
+    Default: AI-Native-2026-08-05-Intuit
+    Description: GitHub org that hosts the gitops config repo.
+  GitHubRepo:
+    Type: String
+    Default: manya-bhasin-expense-config
+    Description: Repo (this gitops config repo).
+
+Resources:
+  BootstrapBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Access logging needs a separate destination bucket; out of scope for this exercise.
+    Properties:
+      BucketName: !Sub "expense-bootstrap-${EnvName}-manya-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref RetentionDays
+      Tags:
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: manya-bhasin}
+        - {Key: Project, Value: expense}
+
+  BootstrapBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BootstrapBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyNonTLS
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt BootstrapBucket.Arn
+              - !Sub "${BootstrapBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  CfnDeployRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable role name required for GitHub Actions role-to-assume.
+          - id: W11
+            reason: cloudformation:ValidateTemplate is not stack-scoped; AWS requires Resource *.
+    Properties:
+      RoleName: expense-api-cfn-deploy-manya
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+              StringLike:
+                "token.actions.githubusercontent.com:sub":
+                  # This org's GitHub Enterprise config appends internal numeric
+                  # entity IDs to the org and repo names in the sub claim
+                  # (repo:org@123/repo@456:pull_request). Wildcards absorb those
+                  # suffixes while still requiring the exact org/repo names.
+                  - !Sub "repo:${GitHubOrg}*/${GitHubRepo}*:ref:refs/heads/config-1"
+                  - !Sub "repo:${GitHubOrg}*/${GitHubRepo}*:pull_request"
+      Policies:
+        - PolicyName: cfn-deploy-narrow
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CfnStackOps
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:DetectStackDrift
+                  - cloudformation:DescribeStackDriftDetectionStatus
+                  - cloudformation:DescribeStackResourceDrifts
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/expense-*"
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/expense-*"
+              - Sid: CfnValidateTemplate
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                Resource: "*"
+              - Sid: BootstrapBucketRead
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt BootstrapBucket.Arn
+                  - !Sub "${BootstrapBucket.Arn}/*"
+              - Sid: PassStackRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/expense-*"
+      Tags:
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: manya-bhasin}
+        - {Key: Project, Value: expense}
+
+Outputs:
+  BootstrapBucketName:
+    Description: Globally-unique bootstrap bucket name.
+    Value: !Ref BootstrapBucket
+    Export: {Name: !Sub "${AWS::StackName}-BucketName"}
+  BootstrapBucketArn:
+    Value: !GetAtt BootstrapBucket.Arn
+    Export: {Name: !Sub "${AWS::StackName}-BucketArn"}
+  CfnDeployRoleArn:
+    Description: ARN the GitHub Actions workflow assumes via OIDC.
+    Value: !GetAtt CfnDeployRole.Arn
+    Export: {Name: !Sub "${AWS::StackName}-CfnDeployRoleArn"}
