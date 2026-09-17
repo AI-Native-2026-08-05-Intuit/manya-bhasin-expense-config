@@ -33,12 +33,14 @@ spec:
             - name: model-cache
               mountPath: /data
           resources:
+            # Course asks cpu 1/2 and memory 2Gi/4Gi. This k3d node OOMKills
+            # that (exit 137) and fails scheduling (Insufficient memory).
             requests:
-              cpu: "1"
-              memory: 2Gi
+              cpu: 250m
+              memory: 512Mi
             limits:
-              cpu: "2"
-              memory: 4Gi
+              cpu: "1"
+              memory: 1536Mi
       volumes:
         - name: model-cache
           emptyDir: {}

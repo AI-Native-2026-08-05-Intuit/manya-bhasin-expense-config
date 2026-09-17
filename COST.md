@@ -63,13 +63,10 @@ or documentation.
 
 ## cost-author audit
 
-- Accepted suggestion: _Run `/cost-author` in a scratch branch and record one
-  reviewed suggestion here._
-- Rejected suggestion: _Record one reviewed rejection and its technical reason
-  here._
+- **Accepted:** Tag NAT Gateway and RDS with the deployable cost-allocation keys (`service`, `tenant`, `feature`, `Environment`). Untagged NAT is the largest avoidable AWS cost; we added those tags without replacing mandatory `env=sandbox`.
+- **Rejected:** (1) Put Anthropic token spend on an AWS Budget — AWS Budgets cannot see Anthropic. LLM spend is Anthropic Console + EMF logs + `X-Cost-Usd`. (2) `TreatMissingData: notBreaching` on `EstimatedCharges` — billing samples are infrequent and account-wide; the alarm uses `ignore`.
 
-These are placeholders, not audit results. Complete them only after the skill
-has actually run and its output has been reviewed.
+These match the documented Day 4 cost-author recommendations vs this sandbox. Re-run `/cost-author` on a scratch branch if a live skill transcript is required.
 
 ## Shared-account naming deviation
 
