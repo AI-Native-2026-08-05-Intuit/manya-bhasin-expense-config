@@ -18,7 +18,14 @@ jobs:
     name: cfn-lint, cfn-nag, validate-template
     runs-on: self-hosted
     timeout-minutes: 15
+    env:
+      # Self-hosted mac: setup-python/setup-ruby default to /Users/runner (hosted image).
+      AGENT_TOOLSDIRECTORY: ${{ runner.temp }}/hostedtoolcache
+      RUNNER_TOOL_CACHE: ${{ runner.temp }}/hostedtoolcache
     steps:
+      - name: Writable tool cache
+        run: mkdir -p "$AGENT_TOOLSDIRECTORY"
+
       - name: Checkout
         uses: actions/checkout@v4
 
