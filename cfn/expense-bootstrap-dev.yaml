@@ -86,6 +86,8 @@ Resources:
         rules_to_suppress:
           - id: W28
             reason: Stable role name required for GitHub Actions role-to-assume.
+          - id: W11
+            reason: cloudformation:ValidateTemplate is not stack-scoped; AWS requires Resource *.
     Properties:
       RoleName: expense-api-cfn-deploy-manya
       AssumeRolePolicyDocument:
