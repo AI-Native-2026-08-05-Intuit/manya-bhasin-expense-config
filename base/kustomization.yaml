@@ -14,6 +14,7 @@ resources:
   - 07-mongo.yaml
   - 08-kafka.yaml
   - 10-expense-api.deployment.yaml
+  - 15-embeddings.deployment.yaml
   - 20-expense-api.service.yaml
   - 30-expense-api.configmap.yaml
   - 40-expense-api.secret.yaml

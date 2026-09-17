@@ -8,10 +8,12 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+    Description: Deployment environment used for naming and environment-specific NAT topology.
   VpcCidr:
     Type: String
     Default: 10.44.0.0/16
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/(1[6-9]|2[0-8]))$
+    Description: IPv4 CIDR allocated to the expense VPC.
     ConstraintDescription: Must be a valid IPv4 CIDR in /16-/28.
 
   OwnerTag:
@@ -185,9 +187,15 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub expense-${EnvName}-nat-a
+        # The sandbox SCP reserves env=sandbox; Environment carries the
+        # deployment environment for cost allocation.
         - {Key: env, Value: sandbox}
         - {Key: user, Value: !Ref OwnerTag}
         - {Key: Project, Value: expense}
+        - {Key: service, Value: expense}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: categorize-expense}
+        - {Key: Environment, Value: !Ref EnvName}
 
   NatEipB:
     Type: AWS::EC2::EIP
@@ -214,6 +222,10 @@ Resources:
         - {Key: env, Value: sandbox}
         - {Key: user, Value: !Ref OwnerTag}
         - {Key: Project, Value: expense}
+        - {Key: service, Value: expense}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: categorize-expense}
+        - {Key: Environment, Value: !Ref EnvName}
 
   NatEipC:
     Type: AWS::EC2::EIP
@@ -240,6 +252,10 @@ Resources:
         - {Key: env, Value: sandbox}
         - {Key: user, Value: !Ref OwnerTag}
         - {Key: Project, Value: expense}
+        - {Key: service, Value: expense}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: categorize-expense}
+        - {Key: Environment, Value: !Ref EnvName}
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
