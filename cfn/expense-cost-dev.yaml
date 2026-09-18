@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Expense cost governance with an AWS Budget and account billing alarm.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Deployment environment used for cost attribution and resource naming.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 100
+    MinValue: 20
+    MaxValue: 100000
+    Description: Monthly USD budget with headroom for NAT Gateway, RDS, and S3 costs.
+  BillingAlarmUsd:
+    Type: Number
+    Default: 120
+    Description: Account-wide estimated USD charge that triggers the CloudWatch alarm.
+
+Resources:
+  CostAlarmsTopic:
+    Type: AWS::SNS::Topic
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable, person-suffixed topic name is required for operator discovery in the shared sandbox.
+    Properties:
+      # The course name is suffixed because SNS topic names are account/region
+      # scoped and this AWS account is shared by multiple learners.
+      TopicName: !Sub "expense-cost-alarms-${EnvName}-manya"
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        # Course taxonomy normally uses env=<deployment environment>. The
+        # sandbox SCP reserves env=sandbox, so Environment carries that value.
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: manya-bhasin}
+        - {Key: Project, Value: expense}
+        - {Key: service, Value: expense}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: categorize-expense}
+        - {Key: Environment, Value: !Ref EnvName}
+
+  CostAlarmsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref CostAlarmsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowBudgetsAndCloudWatchPublish
+            Effect: Allow
+            Principal:
+              Service:
+                - budgets.amazonaws.com
+                - cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref CostAlarmsTopic
+
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "expense-monthly-cost-${EnvName}-manya"
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        # These values match the deployable cost tags. Environment replaces
+        # the course's env key because env=sandbox is mandatory governance.
+        CostFilters:
+          TagKeyValue:
+            - user:service$expense
+            - !Sub "user:Environment$${EnvName}"
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+
+  EstimatedChargesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Stable, person-suffixed alarm name is required for operator discovery in the shared sandbox.
+    Properties:
+      AlarmName: !Sub "expense/estimated-charges-${EnvName}-manya"
+      AlarmDescription: Account-wide estimated AWS charges; this metric cannot be filtered by cost tag.
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold: !Ref BillingAlarmUsd
+      ComparisonOperator: GreaterThanThreshold
+      # AWS/Billing is account-wide, cannot be tag filtered, and updates
+      # relatively infrequently; missing samples must not create false alarms.
+      TreatMissingData: ignore
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref CostAlarmsTopic
+      OKActions:
+        - !Ref CostAlarmsTopic
+      Tags:
+        - {Key: env, Value: sandbox}
+        - {Key: user, Value: manya-bhasin}
+        - {Key: Project, Value: expense}
+        - {Key: service, Value: expense}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: categorize-expense}
+        - {Key: Environment, Value: !Ref EnvName}
+
+Outputs:
+  CostAlarmsTopicArn:
+    Description: SNS topic ARN used by AWS Budgets and the billing alarm.
+    Value: !Ref CostAlarmsTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-CostAlarmsTopicArn"

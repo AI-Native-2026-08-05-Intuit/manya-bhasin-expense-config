@@ -10,6 +10,7 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+    Description: Deployment environment used for naming and shared-secret resolution.
   NetworkStackName:
     Type: String
     Default: expense-network-dev-manya
@@ -17,10 +18,12 @@ Parameters:
   PersonName:
     Type: String
     Default: manya
+    Description: Per-person suffix for account-unique resource names.
   DbInstanceClass:
     Type: String
     Default: db.t4g.small
     AllowedValues: [db.t4g.small, db.t4g.micro, db.t4g.medium]
+    Description: RDS PostgreSQL instance class for the expense database.
   OwnerTag:
     Type: String
     Default: manya-bhasin
@@ -109,10 +112,15 @@ Resources:
       MasterUsername: !Sub "{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:username}}"
       MasterUserPassword: !Sub "{{resolve:secretsmanager:expense/${EnvName}/db-master:SecretString:password}}"
       Tags:
+        # The sandbox SCP reserves env=sandbox; Environment carries the
+        # deployment environment for cost allocation.
         - {Key: Environment, Value: !Ref EnvName}
         - {Key: env, Value: sandbox}
         - {Key: user, Value: !Ref OwnerTag}
         - {Key: Project, Value: expense}
+        - {Key: service, Value: expense}
+        - {Key: tenant, Value: shared}
+        - {Key: feature, Value: categorize-expense}
 
   # Secret itself is created out-of-band (expense/${EnvName}/db-master).
   # Attachment still lives here so rotation can target the live RDS ARN.

@@ -8,12 +8,15 @@ Parameters:
     Type: String
     Default: dev
     AllowedValues: [dev, staging, prod]
+    Description: Deployment environment used in the artifact bucket name.
   OwnerTag:
     Type: String
     Default: manya-bhasin
+    Description: Required sandbox SCP ownership tag value.
   PersonName:
     Type: String
     Default: manya
+    Description: Per-person suffix that keeps the S3 bucket name unique.
 
 Resources:
   ArtifactsBucket:

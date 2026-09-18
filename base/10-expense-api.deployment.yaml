@@ -48,6 +48,13 @@ spec:
           env:
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api
+                  key: ANTHROPIC_API_KEY
+            - name: EMBEDDINGS_URL
+              value: http://embeddings.expense-dev.svc.cluster.local/embed
           resources:
             requests:
               cpu: 250m

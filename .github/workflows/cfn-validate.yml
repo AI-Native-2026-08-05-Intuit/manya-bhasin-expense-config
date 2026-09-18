@@ -1,4 +1,5 @@
 # CloudFormation lint + nag + validate-template
+
 # Runs on PRs that touch cfn/ against the gitops default branch (config-1).
 name: cfn-validate
 
@@ -48,7 +49,8 @@ jobs:
             -t cfn/expense-bootstrap-dev.yaml \
             -t cfn/expense-network-dev.yaml \
             -t cfn/expense-app-dev.yaml \
-            -t cfn/expense-artifacts-dev.yaml
+            -t cfn/expense-artifacts-dev.yaml \
+            -t cfn/expense-cost-dev.yaml
 
       - name: Set up Ruby for cfn-nag
         continue-on-error: true
