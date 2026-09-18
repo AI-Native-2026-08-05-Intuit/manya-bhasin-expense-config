@@ -63,10 +63,13 @@ or documentation.
 
 ## cost-author audit
 
-- **Accepted:** Tag NAT Gateway and RDS with the deployable cost-allocation keys (`service`, `tenant`, `feature`, `Environment`). Untagged NAT is the largest avoidable AWS cost; we added those tags without replacing mandatory `env=sandbox`.
-- **Rejected:** (1) Put Anthropic token spend on an AWS Budget — AWS Budgets cannot see Anthropic. LLM spend is Anthropic Console + EMF logs + `X-Cost-Usd`. (2) `TreatMissingData: notBreaching` on `EstimatedCharges` — billing samples are infrequent and account-wide; the alarm uses `ignore`.
+Run via the repo-local `.claude/skills/cost-author` skill on scratch branch
+`w6d4-cost-author-audit`: `/cost-author expense-config --service expense --env dev --budget 100`.
+Full report with per-rule verdicts and file:line citations:
+[`docs/w6d4-evidence/cost-author-audit.md`](docs/w6d4-evidence/cost-author-audit.md).
 
-These match the documented Day 4 cost-author recommendations vs this sandbox. Re-run `/cost-author` on a scratch branch if a live skill transcript is required.
+- **Accepted:** Tagging every NAT gateway and the RDS instance with the deployable four-key taxonomy (`cfn/expense-network-dev.yaml:187-258`, `cfn/expense-app-dev.yaml:114-123`) — untagged NAT/RDS is the largest avoidable blind spot in Cost Explorer, and the template adds `Environment` alongside the SCP-mandated `env=sandbox` tag rather than replacing it.
+- **Rejected:** Setting `TreatMissingData: notBreaching` on the `EstimatedCharges` alarm (the template correctly uses `ignore` at `cfn/expense-cost-dev.yaml:118`) — `AWS/Billing` metrics are account-wide and update only ~every 6 hours, so `notBreaching` would silently report "healthy" during a real gap in billing data delivery.
 
 ## Shared-account naming deviation
 
