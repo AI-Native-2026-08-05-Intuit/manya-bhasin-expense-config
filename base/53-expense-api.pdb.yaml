@@ -1,0 +1,19 @@
+# base/53-expense-api.pdb.yaml
+# TASK 2: protect the floor. minAvailable matches the HPA minReplicas so a
+# voluntary disruption (node drain, Karpenter consolidation) never takes the
+# service below two serving pods.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: expense-api-pdb
+  namespace: expense-dev
+  labels:
+    app.kubernetes.io/name: expense-api
+    app.kubernetes.io/component: backend
+    app.kubernetes.io/part-of: expense-tracking
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: expense-api

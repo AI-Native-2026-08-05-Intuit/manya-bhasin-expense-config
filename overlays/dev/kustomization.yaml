@@ -51,10 +51,7 @@ patches:
       - op: replace
         path: /data/SPRING_KAFKA_BOOTSTRAP_SERVERS
         value: kafka.expense-dev.svc.cluster.local:9092
-  - target:
-      kind: HorizontalPodAutoscaler
-      name: expense-api
-    patch: |-
-      - op: replace
-        path: /spec/minReplicas
-        value: 1
+  # TASK 2: minReplicas: 2 is the SLO floor (matches expense-api-pdb's
+  # minAvailable: 2) -- dropped the prior dev-only override to 1, which would
+  # have undercut the PDB and let a voluntary disruption take the service to
+  # zero serving pods.
