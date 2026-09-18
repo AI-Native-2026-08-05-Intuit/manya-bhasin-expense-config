@@ -63,13 +63,13 @@ or documentation.
 
 ## cost-author audit
 
-- Accepted suggestion: _Run `/cost-author` in a scratch branch and record one
-  reviewed suggestion here._
-- Rejected suggestion: _Record one reviewed rejection and its technical reason
-  here._
+Run via the repo-local `.claude/skills/cost-author` skill on scratch branch
+`w6d4-cost-author-audit`: `/cost-author expense-config --service expense --env dev --budget 100`.
+Full report with per-rule verdicts and file:line citations:
+[`docs/w6d4-evidence/cost-author-audit.md`](docs/w6d4-evidence/cost-author-audit.md).
 
-These are placeholders, not audit results. Complete them only after the skill
-has actually run and its output has been reviewed.
+- **Accepted:** Tagging every NAT gateway and the RDS instance with the deployable four-key taxonomy (`cfn/expense-network-dev.yaml:187-258`, `cfn/expense-app-dev.yaml:114-123`) — untagged NAT/RDS is the largest avoidable blind spot in Cost Explorer, and the template adds `Environment` alongside the SCP-mandated `env=sandbox` tag rather than replacing it.
+- **Rejected:** Setting `TreatMissingData: notBreaching` on the `EstimatedCharges` alarm (the template correctly uses `ignore` at `cfn/expense-cost-dev.yaml:118`) — `AWS/Billing` metrics are account-wide and update only ~every 6 hours, so `notBreaching` would silently report "healthy" during a real gap in billing data delivery.
 
 ## Shared-account naming deviation
 
