@@ -14,11 +14,16 @@ resources:
   - 07-mongo.yaml
   - 08-kafka.yaml
   - 10-expense-api.deployment.yaml
+  - 11-expense-api-worker.deployment.yaml
+  - 12-expense-worker.scaledobject.yaml
   - 15-embeddings.deployment.yaml
   - 20-expense-api.service.yaml
   - 30-expense-api.configmap.yaml
   - 40-expense-api.secret.yaml
   - 50-expense-api.hpa.yaml
+  - 53-expense-api.pdb.yaml
   # Ingress is not on the AppProject namespaceResourceWhitelist.
   # - 60-expense-api.ingress.yaml
   - 60-expense-api.servicemonitor.yaml
+  # 51-prometheus-adapter-values.yaml is Helm values, not a kustomize
+  # resource -- see the comment in that file for the install command.

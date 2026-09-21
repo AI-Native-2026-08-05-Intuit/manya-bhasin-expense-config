@@ -1,0 +1,27 @@
+# base/12-expense-worker.scaledobject.yaml
+# TASK 1 (RUNNABLE on k3d): KEDA scales the merchants.events worker on Kafka
+# consumer-group lag. lagThreshold: "10" means the generated HPA targets 10
+# messages of lag per pod; 73 messages of lag scale to ceil(73/10) = 8 pods --
+# the same ceil math the Task 4 SQS queueLength variant uses. The dev Kafka
+# broker is plaintext, so no TriggerAuthentication is needed here; the
+# credential discipline lives in the SQS variant (Task 4, author-only).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: expense-worker-scaledobject
+  namespace: expense-dev
+spec:
+  scaleTargetRef:
+    name: expense-api-worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka.expense-dev.svc.cluster.local:9092
+        consumerGroup: expense-worker
+        topic: merchants.events
+        lagThreshold: "10"
+        offsetResetPolicy: latest
